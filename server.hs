@@ -3,30 +3,33 @@ import Network
 import System.IO
 import System.IO.Error
 import Control.Concurrent
+import Control.Concurrent.Chan
 import Control.Exception
 import System.Exit
 import Control.Applicative
 import Control.Monad (forever)
 
 main = do
-    putStrLn "Server v0.0.2"
+    putStrLn "Server v0.0.3"
+        
+    -- GHC crashes if you use `newChan` or `dupChan` inside `withSocketsDo`.
+    -- Even though the documentation says you need `withSocketsDo` on Windows
+    -- the code seems to work, at least on my two Windows machines (I'm using
+    -- msysgit). That's why I have omitted the `withSocketsDo` part.
 
-    withSocketsDo $ do
-        sock <- listenOn $ PortNumber 4000
+    chan <- newChan 
+    sock <- listenOn $ PortNumber 4000
 
-        mainLoop sock
+    mainLoop sock chan
 
 
-mainLoop :: Socket -> IO ()
-mainLoop sock = forever $ do
+mainLoop :: Socket -> Chan ChatProtocol -> IO ()
+mainLoop sock chan = forever $ do
     -- This is a blocking call
-    (handle, n, p) <- accept sock
-    print n
-    print p
+    (handle, hostname, port) <- accept sock
+    putStrLn $ "'" ++ hostname ++ ":"++ show port ++"' connected to the server"
 
-    forkIO $ clientConnected handle `catchIOError` clientDisconnect
-
-    putStrLn "MainLoop()"
+    forkIO $ clientConnected handle chan `catchIOError` clientDisconnect
 
 
 clientDisconnect :: IOException -> IO ()
@@ -34,23 +37,31 @@ clientDisconnect e = do
     putStrLn $ "Client disconnected, ("++ show e ++")"
 
 
-clientConnected :: Handle -> IO ()
-clientConnected handle = do
-    putStrLn $ "Client connected"
-
+clientConnected :: Handle -> Chan ChatProtocol -> IO ()
+clientConnected handle chan = do
     hPutStrLn handle welcomeMsg
 
-    clientHandler handle
+    chan' <- dupChan chan
+
+    forkIO $ clientBroadcast handle chan'
+    forkIO $ clientWrites handle chan
+
+    return ()
 
 
-clientHandler :: Handle -> IO ()
-clientHandler handle = do
+clientWrites :: Handle -> Chan ChatProtocol -> IO ()
+clientWrites handle chan = forever $ do
     userInput <- (\x -> read x :: ChatProtocol) <$> hGetLine handle
 
-    putStrLn $ username userInput ++": "++ message userInput
-    hPutStrLn handle $ simpleBot $ message userInput
+    writeChan chan userInput
 
-    clientHandler handle
+    logger $ username userInput ++": "++ message userInput
+
+
+clientBroadcast :: Handle -> Chan ChatProtocol -> IO ()
+clientBroadcast handle chan = forever $ do
+    clientData <- readChan chan
+    hPutStrLn handle $ username clientData ++": "++ message clientData
 
 
 welcomeMsg :: String
@@ -59,7 +70,7 @@ welcomeMsg = "Hi!"
 
 simpleBot :: String -> String
 simpleBot str =
-    case str of
+    case str' of
         "hi"      -> "Hello!"
         "wazup"   -> "The sky of course, what else would be up?"
         "-.-"     -> ":D"
@@ -68,3 +79,6 @@ simpleBot str =
         "help"    -> "Ask google, google knows everything"
         "bai"     -> "Goodbye"
         _         -> "I agree!"
+
+    where
+        str' = strToLower str

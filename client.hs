@@ -5,6 +5,7 @@ import System.IO
 import Control.Concurrent
 import Control.Concurrent.Async (race_)
 import Control.Exception.Base
+import Control.Applicative
 
 
 main = do 
@@ -28,8 +29,7 @@ mainLoop handle username = do
 
     where
         fromServer = forever $ do
-            line <- hGetLine handle
-            putStrLn $ "Server: " ++ line
+            hGetLine handle >>= putStrLn
 
         toServer = do
             let chatProtocol = ChatProtocol username
