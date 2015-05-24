@@ -17,6 +17,10 @@ main = do
 
     withSocketsDo $ do
         handle <- connectTo "localhost" (PortNumber 4000)
+
+        --hPutStrLn handle $ show $ ChatProtocol username "/authorize"
+
+
         mainLoop handle username `finally` hClose handle
 
 

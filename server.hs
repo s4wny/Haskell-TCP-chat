@@ -20,20 +20,20 @@ main = do
     chan <- newChan 
     sock <- listenOn $ PortNumber 4000
 
-    mainLoop sock chan
+    handleNewClients sock chan
 
 
-mainLoop :: Socket -> Chan ChatProtocol -> IO ()
-mainLoop sock chan = forever $ do
+handleNewClients :: Socket -> Chan ChatProtocol -> IO ()
+handleNewClients sock chan = forever $ do
     -- This is a blocking call
     (handle, hostname, port) <- accept sock
-    putStrLn $ "'" ++ hostname ++ ":"++ show port ++"' connected to the server"
+    logger $ "'" ++ hostname ++ ":"++ show port ++"' connected to the server"
 
-    forkIO $ clientConnected handle chan `catchIOError` clientDisconnect
+    forkIO $ clientConnected handle chan `catchIOError` clientDisconnected
 
 
-clientDisconnect :: IOException -> IO ()
-clientDisconnect e = do
+clientDisconnected :: IOException -> IO ()
+clientDisconnected e = do
     putStrLn $ "Client disconnected, ("++ show e ++")"
 
 
@@ -43,14 +43,15 @@ clientConnected handle chan = do
 
     chan' <- dupChan chan
 
-    forkIO $ clientBroadcast handle chan'
-    forkIO $ clientWrites handle chan
+    forkIO $ broadcastToClient handle chan'
+    forkIO $ whenClientWrite handle chan
 
     return ()
 
 
-clientWrites :: Handle -> Chan ChatProtocol -> IO ()
-clientWrites handle chan = forever $ do
+whenClientWrite :: Handle -> Chan ChatProtocol -> IO ()
+whenClientWrite handle chan = forever $ do
+    -- Blocking call, waits for client to write something
     userInput <- (\x -> read x :: ChatProtocol) <$> hGetLine handle
 
     writeChan chan userInput
@@ -58,9 +59,11 @@ clientWrites handle chan = forever $ do
     logger $ username userInput ++": "++ message userInput
 
 
-clientBroadcast :: Handle -> Chan ChatProtocol -> IO ()
-clientBroadcast handle chan = forever $ do
+broadcastToClient :: Handle -> Chan ChatProtocol -> IO ()
+broadcastToClient handle chan = forever $ do
+    -- Blocking call, waits for new messages in chan
     clientData <- readChan chan
+
     hPutStrLn handle $ username clientData ++": "++ message clientData
 
 
